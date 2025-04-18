@@ -116,7 +116,7 @@ openvpn \
   --auth-user-pass "$CREDENTIALS_FILE" \
   --auth-nocache \
   --daemon \
-  --log /var/log/openvpn.log \
+  --log /dev/stdout \
   --writepid "$OPENVPN_PID_FILE" \
   --script-security 2 \
   --up-delay \
