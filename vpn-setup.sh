@@ -107,20 +107,22 @@ fi
 echo "Found OVPN configuration file: ${TARGET_OVPN_CONFIG} (Protocol: ${ACTUAL_PROTOCOL})"
 
 # --- Start OpenVPN ---
-echo "Starting OpenVPN..."
+echo "Starting OpenVPN with configuration: $TARGET_OVPN_CONFIG"
+mkdir -p "$(dirname "$OPENVPN_PID_FILE")"
 
-# Run OpenVPN in the background
+# Setup auth-nocache with proper auth
 openvpn \
   --config "$TARGET_OVPN_CONFIG" \
   --auth-user-pass "$CREDENTIALS_FILE" \
+  --auth-nocache \
   --daemon \
-  --log /dev/stdout \
+  --log /var/log/openvpn.log \
   --writepid "$OPENVPN_PID_FILE" \
   --script-security 2 \
   --up-delay \
   --ping 10 \
   --ping-restart 60 \
-  --persist-tun --persist-key &
+  --persist-tun --persist-key
 
 sleep 2 # Give time for PID file creation
 
@@ -135,9 +137,9 @@ echo "Waiting for tun0 interface..."
 TIMEOUT=30; COUNT=0
 until ip link show tun0 > /dev/null 2>&1; do
   if [ $COUNT -ge $TIMEOUT ]; then
-  echo "Error: Timeout waiting for tun0 interface."
-  kill "$OPENVPN_PID" 2>/dev/null || true
-  exit 1
+    echo "Error: Timeout waiting for tun0 interface."
+    kill "$OPENVPN_PID" 2>/dev/null || true
+    exit 1
   fi
   echo "tun0 not found yet, waiting... (${COUNT}s / ${TIMEOUT}s)"
   sleep 1; ((COUNT++))
@@ -146,7 +148,6 @@ echo "tun0 interface is up."
 
 # --- Configure Routing ---
 echo "Configuring routing..."
-
 EXCLUDED_CIDRS=( "127.0.0.1/8" "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16" "${KUBERNETES_SERVICE_CIDR}" "${KUBERNETES_POD_CIDR}" )
 VPN_TABLE=100
 
