@@ -151,22 +151,84 @@ echo "Configuring routing..."
 EXCLUDED_CIDRS=( "127.0.0.1/8" "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16" "${KUBERNETES_SERVICE_CIDR}" "${KUBERNETES_POD_CIDR}" )
 VPN_TABLE=100
 
-ip route flush table $VPN_TABLE || true
+# Create routing table if it doesn't exist
+mkdir -p /etc/iproute2/
+touch /etc/iproute2/rt_tables
+grep -q "$VPN_TABLE" /etc/iproute2/rt_tables || echo "$VPN_TABLE vpntable" >> /etc/iproute2/rt_tables
+
+# Set up routing
+ip route flush table $VPN_TABLE 2>/dev/null || true
 ip route add default dev tun0 table $VPN_TABLE
-ip rule flush || true
-ip rule add prio 100 lookup main
+
+# Ensure DNS resolution works properly
+echo "Configuring DNS resolution..."
+if grep -q "dhcp-option DNS" /proc/net/openvpn/status 2>/dev/null; then
+  # Extract DNS servers pushed by VPN
+  VPN_DNS=$(grep "dhcp-option DNS" /proc/net/openvpn/status | awk '{print $3}')
+  echo "Using DNS servers from VPN: $VPN_DNS"
+  
+  # Use the VPN DNS servers
+  echo "nameserver $VPN_DNS" > /etc/resolv.conf
+  echo "nameserver 8.8.8.8" >> /etc/resolv.conf  # Google DNS as backup
+  echo "nameserver 1.1.1.1" >> /etc/resolv.conf  # Cloudflare DNS as backup
+else
+  # Fallback to public DNS servers
+  echo "No VPN DNS servers detected, using public DNS servers"
+  echo "nameserver 8.8.8.8" > /etc/resolv.conf  # Google DNS
+  echo "nameserver 1.1.1.1" >> /etc/resolv.conf  # Cloudflare DNS
+fi
+
+# More straightforward IP policy routing setup
+echo "Configuring IP policy routing..."
+ip rule flush 2>/dev/null || true
+ip rule add prio 100 from all lookup main
+ip rule add prio 200 from all lookup default
 for cidr in "${EXCLUDED_CIDRS[@]}"; do ip rule add to "$cidr" prio 150 lookup main; done
-SIDECAR_IP=$(hostname -i)
+SIDECAR_IP=$(hostname -i 2>/dev/null || echo "")
 if [ -n "$SIDECAR_IP" ]; then ip rule add from "$SIDECAR_IP" prio 140 lookup main; fi
 ip rule add prio 200 lookup $VPN_TABLE
+
+# Enable IP forwarding
 sysctl -w net.ipv4.ip_forward=1 > /dev/null
-iptables -t nat -F POSTROUTING || true
+
+# Set up NAT for the VPN interface
+echo "Setting up NAT..."
+iptables -t nat -F POSTROUTING 2>/dev/null || true
 iptables -t nat -A POSTROUTING -o tun0 -j MASQUERADE
+iptables -A FORWARD -i tun0 -o eth0 -m state --state RELATED,ESTABLISHED -j ACCEPT
+iptables -A FORWARD -i eth0 -o tun0 -j ACCEPT
 echo "Routing setup complete."
+
+# Print network status for debugging
+echo "Network interfaces:"
+ip addr
+echo "Routing tables:"
+ip route
+echo "Routing rules:"
+ip rule show
+echo "DNS configuration:"
+cat /etc/resolv.conf
 
 # Print the current IP address for verification
 echo "Current external IP address:"
-wget -q -O - https://ifconfig.me/ip || echo "Could not determine external IP"
+# Try multiple IP detection services with better error handling
+IP_FOUND=false
+for service in "http://ipinfo.io/ip" "http://checkip.amazonaws.com" "http://icanhazip.com" "http://api.ipify.org"; do
+  echo "Checking IP using $service..."
+  if IP=$(wget -q -T 5 -t 2 -O - "$service" 2>/dev/null) && [ -n "$IP" ]; then
+    echo "$IP"
+    IP_FOUND=true
+    break
+  else
+    echo "Failed to get IP from $service, trying next service..."
+  fi
+done
+
+if ! $IP_FOUND; then
+  echo "Warning: Could not determine external IP. Testing DNS resolution:"
+  nslookup google.com || echo "DNS resolution failed"
+  ping -c 1 8.8.8.8 || echo "Cannot ping Google DNS (8.8.8.8)"
+fi
 
 # --- Monitor OpenVPN Process ---
 echo "Monitoring OpenVPN process (PID: $OPENVPN_PID)..."
