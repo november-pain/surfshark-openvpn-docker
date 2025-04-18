@@ -26,9 +26,27 @@ fi
 
 echo "Using pre-downloaded configurations from ${CONFIG_DIR}"
 
+# Set VPN protocol preference (default to UDP with TCP fallback)
+VPN_PROTOCOL="${VPN_PROTOCOL:-udp}"
+echo "Preferred VPN protocol: ${VPN_PROTOCOL}"
+
 # Find the appropriate configuration file
-echo "Searching for OVPN file matching '${VPN_REGION_IDENTIFIER}' in ${CONFIG_DIR}..."
-TARGET_OVPN_CONFIG=$(find "${CONFIG_DIR}" -type f -name "*${VPN_REGION_IDENTIFIER}*.ovpn" -print -quit)
+echo "Searching for OVPN file matching '${VPN_REGION_IDENTIFIER}' with protocol '${VPN_PROTOCOL}' in ${CONFIG_DIR}..."
+
+# First try the preferred protocol
+TARGET_OVPN_CONFIG=$(find "${CONFIG_DIR}" -type f -name "*${VPN_REGION_IDENTIFIER}*${VPN_PROTOCOL}*.ovpn" -print -quit)
+
+# If not found and preferred is UDP, try TCP as fallback
+if [ -z "$TARGET_OVPN_CONFIG" ] && [ "${VPN_PROTOCOL}" = "udp" ]; then
+  echo "UDP configuration not found, trying TCP as fallback..."
+  TARGET_OVPN_CONFIG=$(find "${CONFIG_DIR}" -type f -name "*${VPN_REGION_IDENTIFIER}*tcp*.ovpn" -print -quit)
+fi
+
+# If still not found, try without protocol specification
+if [ -z "$TARGET_OVPN_CONFIG" ]; then
+  echo "Protocol-specific configuration not found, trying any protocol..."
+  TARGET_OVPN_CONFIG=$(find "${CONFIG_DIR}" -type f -name "*${VPN_REGION_IDENTIFIER}*.ovpn" -print -quit)
+fi
 
 if [ -z "$TARGET_OVPN_CONFIG" ]; then
   echo "Error: Could not find an OVPN file matching '${VPN_REGION_IDENTIFIER}' in the pre-downloaded configurations."
@@ -48,7 +66,20 @@ if [ -z "$TARGET_OVPN_CONFIG" ]; then
   
   if wget -q --no-check-certificate -O "${ZIP_FILE}" "https://surfshark.com/api/v1/server/configurations" && \
      unzip -q -o "${ZIP_FILE}" -d "${CONFIGS_DIR}"; then
-    TARGET_OVPN_CONFIG=$(find "${CONFIGS_DIR}" -type f -name "*${VPN_REGION_IDENTIFIER}*.ovpn" -print -quit)
+    
+    # Try with preferred protocol first in downloaded configs
+    TARGET_OVPN_CONFIG=$(find "${CONFIGS_DIR}" -type f -name "*${VPN_REGION_IDENTIFIER}*${VPN_PROTOCOL}*.ovpn" -print -quit)
+    
+    # Try fallback protocol if preferred is UDP and not found
+    if [ -z "$TARGET_OVPN_CONFIG" ] && [ "${VPN_PROTOCOL}" = "udp" ]; then
+      echo "UDP configuration not found in downloads, trying TCP as fallback..."
+      TARGET_OVPN_CONFIG=$(find "${CONFIGS_DIR}" -type f -name "*${VPN_REGION_IDENTIFIER}*tcp*.ovpn" -print -quit)
+    fi
+    
+    # Last resort: any protocol
+    if [ -z "$TARGET_OVPN_CONFIG" ]; then
+      TARGET_OVPN_CONFIG=$(find "${CONFIGS_DIR}" -type f -name "*${VPN_REGION_IDENTIFIER}*.ovpn" -print -quit)
+    fi
     
     if [ -z "$TARGET_OVPN_CONFIG" ]; then
       echo "Error: Still could not find configuration for ${VPN_REGION_IDENTIFIER} after download."
@@ -64,7 +95,16 @@ if [ -z "$TARGET_OVPN_CONFIG" ]; then
   fi
 fi
 
-echo "Found OVPN configuration file: ${TARGET_OVPN_CONFIG}"
+# Extract the actual protocol being used from the filename
+if [[ "$TARGET_OVPN_CONFIG" == *"udp"* ]]; then
+  ACTUAL_PROTOCOL="UDP"
+elif [[ "$TARGET_OVPN_CONFIG" == *"tcp"* ]]; then
+  ACTUAL_PROTOCOL="TCP"
+else
+  ACTUAL_PROTOCOL="unknown"
+fi
+
+echo "Found OVPN configuration file: ${TARGET_OVPN_CONFIG} (Protocol: ${ACTUAL_PROTOCOL})"
 
 # --- Start OpenVPN ---
 echo "Starting OpenVPN..."

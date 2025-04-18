@@ -17,6 +17,7 @@ with pre-downloaded Surfshark VPN configurations. Can also be used as a standalo
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `VPN_REGION_IDENTIFIER` | Surfshark region code (e.g., "uk-lon") | (required) |
+| `VPN_PROTOCOL` | VPN protocol to use (udp or tcp) | udp |
 | `KUBERNETES_SERVICE_CIDR` | Kubernetes service CIDR | 10.96.0.0/12 |
 | `KUBERNETES_POD_CIDR` | Kubernetes pod CIDR | 10.244.0.0/16 |
 | `CREDENTIALS_FILE` | Path to credentials file | /etc/openvpn/auth/credentials.txt |

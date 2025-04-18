@@ -27,6 +27,7 @@ RUN chmod +x /usr/local/bin/vpn-setup.sh
 
 # Default environment variables (can be overridden at runtime)
 ENV VPN_REGION_IDENTIFIER="" \
+    VPN_PROTOCOL="udp" \
     KUBERNETES_SERVICE_CIDR="10.96.0.0/12" \
     KUBERNETES_POD_CIDR="10.244.0.0/16" \
     CREDENTIALS_FILE="/etc/openvpn/auth/credentials.txt"
