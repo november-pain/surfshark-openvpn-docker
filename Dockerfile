@@ -9,7 +9,11 @@ RUN apk add --no-cache \
     iproute2 \
     procps \
     bash \
-    ca-certificates
+    ca-certificates \
+    bind-tools \    # For nslookup, dig
+    curl \          # For HTTP requests
+    tcpdump \       # For network packet analysis
+    busybox-extras  # For telnet and other utilities
 
 # Create necessary directories
 RUN mkdir -p /etc/openvpn/auth /etc/openvpn/config /etc/openvpn/surfshark
