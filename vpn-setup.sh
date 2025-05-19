@@ -181,11 +181,30 @@ fi
 # More straightforward IP policy routing setup
 echo "Configuring IP policy routing..."
 ip rule flush 2>/dev/null || true
-ip rule add prio 100 from all lookup main
-ip rule add prio 200 from all lookup default
-for cidr in "${EXCLUDED_CIDRS[@]}"; do ip rule add to "$cidr" prio 150 lookup main; done
+
+# Setup policy routing with correct priorities (lower = higher priority)
+# 1. Handle loopback traffic
+ip rule add prio 10 from all to 127.0.0.0/8 lookup local
+
+# 2. Add bidirectional rules for Kubernetes with higher priority
+for cidr in "${EXCLUDED_CIDRS[@]}"; do
+  echo "Setting bidirectional rules for $cidr"
+  ip rule add from "$cidr" prio 50 lookup main
+  ip rule add to "$cidr" prio 50 lookup main
+done
+
+# 3. Add local pod address rule
 SIDECAR_IP=$(hostname -i 2>/dev/null || echo "")
-if [ -n "$SIDECAR_IP" ]; then ip rule add from "$SIDECAR_IP" prio 140 lookup main; fi
+if [ -n "$SIDECAR_IP" ]; then
+  echo "Setting rules for sidecar IP: $SIDECAR_IP"
+  ip rule add from "$SIDECAR_IP" prio 60 lookup main
+fi
+
+# 4. Add main route table lookup with medium priority
+ip rule add prio 100 from all lookup main
+
+# 5. Add default and VPN routes with lowest priority
+ip rule add prio 200 from all lookup default
 ip rule add prio 200 lookup $VPN_TABLE
 
 # Enable IP forwarding
@@ -197,7 +216,22 @@ iptables -t nat -F POSTROUTING 2>/dev/null || true
 iptables -t nat -A POSTROUTING -o tun0 -j MASQUERADE
 iptables -A FORWARD -i tun0 -o eth0 -m state --state RELATED,ESTABLISHED -j ACCEPT
 iptables -A FORWARD -i eth0 -o tun0 -j ACCEPT
+iptables -A FORWARD -i eth0 -o eth0 -j ACCEPT
 echo "Routing setup complete."
+
+echo "Adding specific routes for Kubernetes networks..."
+DEFAULT_GW=$(ip route | grep -m 1 "^default.*eth0" | awk '{print $3}')
+if [ -n "$DEFAULT_GW" ]; then
+  for cidr in "${EXCLUDED_CIDRS[@]}"; do
+    echo "Adding route for $cidr via $DEFAULT_GW"
+    ip route add "$cidr" via "$DEFAULT_GW" dev eth0
+  done
+  # Flush routing cache to apply changes immediately
+  ip route flush cache
+  echo "Kubernetes-specific routes added successfully"
+else
+  echo "Warning: Could not determine default gateway for eth0"
+fi
 
 # Print network status for debugging
 echo "Network interfaces:"
