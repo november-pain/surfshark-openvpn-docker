@@ -223,8 +223,13 @@ echo "Adding specific routes for Kubernetes networks..."
 DEFAULT_GW=$(ip route | grep -m 1 "^default.*eth0" | awk '{print $3}')
 if [ -n "$DEFAULT_GW" ]; then
   for cidr in "${EXCLUDED_CIDRS[@]}"; do
-    echo "Adding route for $cidr via $DEFAULT_GW"
-    ip route add "$cidr" via "$DEFAULT_GW" dev eth0
+    # Skip the loopback network
+    if [ "$cidr" != "127.0.0.1/8" ]; then
+      echo "Adding route for $cidr via $DEFAULT_GW"
+      ip route add "$cidr" via "$DEFAULT_GW" dev eth0
+    else
+      echo "Skipping loopback network $cidr - already handled by local routing"
+    fi
   done
   # Flush routing cache to apply changes immediately
   ip route flush cache
